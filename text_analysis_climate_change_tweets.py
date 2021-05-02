@@ -1,1 +1,236 @@
-{"metadata":{"kernelspec":{"language":"python","display_name":"Python 3","name":"python3"},"language_info":{"pygments_lexer":"ipython3","nbconvert_exporter":"python","version":"3.6.4","file_extension":".py","codemirror_mode":{"name":"ipython","version":3},"name":"python","mimetype":"text/x-python"}},"nbformat_minor":4,"nbformat":4,"cells":[{"cell_type":"code","source":"# %% [code]\n# importing libraries\nimport numpy as np\nimport pandas as pd\nimport matplotlib.pyplot as plt\nimport seaborn as sns\nimport copy\n%matplotlib inline\n\n# %% [code]\ntsa = pd.read_csv(\"../input/twitter-climate-change-sentiment-dataset/twitter_sentiment_data.csv\")\ntsa.head()\n\n# %% [code]\ntsa.drop(\"sentiment\", axis=1, inplace=True)\ntsa.head()\n\n# %% [markdown]\n# ### LENGTH OF TWEET\n\n# %% [code]\nfig = plt.figure(figsize=(10, 10))\ntsa['message'].str.len().hist()\nfig.savefig(\"hist-length-of-tweet.png\", bbox_inches = 'tight')\n\n# %% [markdown]\n# ### NUMBER OF WORDS IN A TWEET\n\n# %% [code]\nfig = plt.figure(figsize=(10, 10))\ntsa['message'].str.split().map(lambda x : len(x)).hist()\nfig.savefig(\"hist-no-words-of-tweet.png\", bbox_inches = 'tight')\n\n# %% [markdown]\n# ### AVERAGE WORD LENGTH IN A TWEET\n\n# %% [code]\nfig = plt.figure(figsize=(8, 8))\nobj = tsa['message'].str.split().apply(lambda x : [len(i) for i in x])\nobj = obj.map(lambda x : np.mean(x)) #map is only for pandas objects\nobj.hist()\nfig.savefig(\"hist-avg-wordlen-of-tweet.png\", bbox_inches = 'tight')\n\n# %% [markdown]\n# ### FREQUENCY OF THE STOP WORDS\n\n# %% [code]\n# import re\nimport nltk\n# nltk.download('stopwords')\nfrom nltk.corpus import stopwords\nstop = set(stopwords.words('english'))\n# stop\n\n# %% [code]\ncorpus = []\ntwt = tsa['message'].str.split()\ntwt = twt.values.tolist()\ncorpus = [word for i in twt for word in i]\n# corpus\n\n# %% [code]\nfrom collections import defaultdict\ndic = defaultdict(int)\n\nfor word in corpus:\n    if word in stop:\n        dic[word] = dic[word] + 1\n        \n# dic\n\n# %% [code]\nfig = plt.figure(figsize = (20, 10))\ntop = sorted(dic.items(), key=lambda x:x[1],reverse=True)[:20] \nx,y = zip(*top)\nplt.bar(x,y)\nfig.savefig(\"top-stopwords-bar.png\", bbox_inches=\"tight\")\n\n# %% [markdown]\n# ### FREQUENCY OF WORDS OTHER THAN STOPWORDS\n\n# %% [code]\nimport collections\nfrom collections import Counter\nimport re\n\ndef username_filter(word):\n    if(re.search(\"^@\", word) == None and re.search(\"^((http|https)\\:\\/\\/)\", word) == None \n       and re.search(\"^&amp;$\", word) == None and word != \"RT\" and word != \"|\" and word != \"-\"):\n        return True\n    else:\n#         print(word)\n        return False\n    \nfiltered_corpus = filter(username_filter, corpus)\nfiltered_corpus = list(filtered_corpus)\n# filtered_corpus\n\n# %% [code]\ncounter = Counter(filtered_corpus)\nmost = counter.most_common()\n# most[:100]\n\n# print(len(most))\n\nx, y= [], []\nfor word,count in most[:125]:\n    if (word not in stop):\n        x.append(word)\n        y.append(count)\n        \n# print(len(x)) \nfig = plt.figure(figsize = (20, 10))\nplt.xticks(rotation = 90)\nplt.xlabel(\"Words\")\nplt.ylabel(\"Count\")\nsns.barplot(x = x, y = y)\nfig.savefig(\"freq-words-barplot.png\", bbox_inches = \"tight\")\n\n# %% [markdown]\n# ### MOST FREQUENT N-GRAMS\n\n# %% [code]\nfrom sklearn.feature_extraction.text import CountVectorizer\ndef get_top_ngram(corpus, n=None):\n    vec = CountVectorizer(ngram_range=(n, n)).fit(corpus)\n    bow = vec.transform(corpus)\n    sum_words = bow.sum(axis=0) \n    words_freq = [(word, sum_words[0, idx]) for word, idx in vec.vocabulary_.items()]\n    words_freq = sorted(words_freq, key = lambda x: x[1], reverse=True)\n    return words_freq[:140]\n\n# %% [code]\nvec = CountVectorizer(ngram_range = (2, 2)).fit(filtered_corpus)\nbow = vec.transform(filtered_corpus)\nsum_words = bow.sum(axis = 0)\nwords_freq = [(word, sum_words[0, idx]) for word, idx in vec.vocabulary_.items()]\nwords_freq = sorted(words_freq, key = lambda x: x[1], reverse=True)\n# words_freq\n\n# %% [code]\ntop_n_bigrams=get_top_ngram(tsa['message'],2)[:30]\nprint(top_n_bigrams)\nx,y=map(list,zip(*top_n_bigrams)) \nfig = plt.figure(figsize = (20, 10))\nplt.xticks(rotation = 90)\nplt.xlabel(\"Bigrams\")\nplt.ylabel(\"Count\")\nsns.barplot(x = x, y = y)\nfig.savefig(\"freq-bigrams-barplot.png\", bbox_inches = \"tight\")\n\n# %% [code]\ntop_n_trigrams=get_top_ngram(tsa['message'],3)[:25]\nprint(top_n_trigrams)\nx,y=map(list,zip(*top_n_trigrams)) \nfig = plt.figure(figsize = (20, 10))\nplt.xticks(rotation = 90)\nplt.xlabel(\"Trigrams\")\nplt.ylabel(\"Count\")\nsns.barplot(x = x, y = y)\nfig.savefig(\"freq-trigrams-barplot.png\", bbox_inches = \"tight\")\n\n# %% [markdown]\n# ### TOPIC MODELLING WITH pyLDAvis\n\n# %% [code]\nimport nltk\nimport gensim\nfrom nltk.stem import PorterStemmer\nfrom nltk.stem import WordNetLemmatizer\nfrom nltk.tokenize import word_tokenize\nfrom nltk import punkt\nfrom nltk import wordnet\n# nltk.download('punkt')\n# nltk.download('wordnet')\n\n# %% [code]\ndef preprocess_tweets(df):\n    corpus = []\n    stem = PorterStemmer()\n    lem = wordnet.WordNetLemmatizer()\n    for tweet in df['message']:\n        words = [w for w in word_tokenize(tweet) if ((w.lower() not in stop) and username_filter(w))]\n        words = [lem.lemmatize(w) for w in words if len(w) > 2]\n        corpus.append(words)\n    return corpus\n\ncorpus = preprocess_tweets(tsa)\n# corpus\n\n# %% [code]\ndic = gensim.corpora.Dictionary(corpus)\nbow_corpus = [dic.doc2bow(doc) for doc in corpus]\n\n# %% [code]\nlda_model = gensim.models.LdaMulticore(bow_corpus, num_topics = 4, id2word = dic, passes = 10, workers = 2)\nlda_model.show_topics()\n\n# %% [markdown]\n# ### VISUALIZING RESULTS OF LDA\n\n# %% [code]\nimport pyLDAvis\nfrom pyLDAvis import gensim_models\n\n# %% [code]\n# fig = plt.figure(figsize = (20, 20))\npyLDAvis.enable_notebook()\nvis = gensim_models.prepare(lda_model, bow_corpus, dic)\nvis\n\n# %% [code]\nfrom wordcloud import WordCloud, STOPWORDS\nstopwords = set(STOPWORDS)\n\ndef show_wordcloud(data):\n    wordcloud = WordCloud(\n        background_color='white',\n        stopwords=stopwords,\n        max_words=100,\n        max_font_size=30,\n        scale=3,\n        random_state=1)\n   \n    wordcloud=wordcloud.generate(str(data))\n\n    fig = plt.figure(1, figsize=(12, 12))\n    plt.axis('off')\n\n    plt.imshow(wordcloud)\n    plt.show()\n    fig.savefig(\"wordcloud.png\", bbox_inches = \"tight\")\n\nshow_wordcloud(corpus)\n\n# %% [code]\n","metadata":{"_uuid":"7b21d90d-5c94-44c4-80bf-688b7e7f3a46","_cell_guid":"da07f602-6ca2-4f0c-b18f-8b55e75fcab9","collapsed":false,"jupyter":{"outputs_hidden":false},"trusted":true},"execution_count":null,"outputs":[]}]}
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+# importing libraries
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import copy
+%matplotlib inline
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+tsa = pd.read_csv("../input/twitter-climate-change-sentiment-dataset/twitter_sentiment_data.csv")
+tsa.head()
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+tsa.drop("sentiment", axis=1, inplace=True)
+tsa.head()
+
+# %% [markdown]
+# ### LENGTH OF TWEET
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+fig = plt.figure(figsize=(10, 10))
+tsa['message'].str.len().hist()
+fig.savefig("hist-length-of-tweet.png", bbox_inches = 'tight')
+
+# %% [markdown]
+# ### NUMBER OF WORDS IN A TWEET
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+fig = plt.figure(figsize=(10, 10))
+tsa['message'].str.split().map(lambda x : len(x)).hist()
+fig.savefig("hist-no-words-of-tweet.png", bbox_inches = 'tight')
+
+# %% [markdown]
+# ### AVERAGE WORD LENGTH IN A TWEET
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+fig = plt.figure(figsize=(8, 8))
+obj = tsa['message'].str.split().apply(lambda x : [len(i) for i in x])
+obj = obj.map(lambda x : np.mean(x)) #map is only for pandas objects
+obj.hist()
+fig.savefig("hist-avg-wordlen-of-tweet.png", bbox_inches = 'tight')
+
+# %% [markdown]
+# ### FREQUENCY OF THE STOP WORDS
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+# import re
+import nltk
+# nltk.download('stopwords')
+from nltk.corpus import stopwords
+stop = set(stopwords.words('english'))
+# stop
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+corpus = []
+twt = tsa['message'].str.split()
+twt = twt.values.tolist()
+corpus = [word for i in twt for word in i]
+# corpus
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+from collections import defaultdict
+dic = defaultdict(int)
+
+for word in corpus:
+    if word in stop:
+        dic[word] = dic[word] + 1
+        
+# dic
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+fig = plt.figure(figsize = (20, 10))
+top = sorted(dic.items(), key=lambda x:x[1],reverse=True)[:20] 
+x,y = zip(*top)
+plt.bar(x,y)
+fig.savefig("top-stopwords-bar.png", bbox_inches="tight")
+
+# %% [markdown]
+# ### FREQUENCY OF WORDS OTHER THAN STOPWORDS
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+import collections
+from collections import Counter
+import re
+
+def username_filter(word):
+    if(re.search("^@", word) == None and re.search("^((http|https)\:\/\/)", word) == None 
+       and re.search("^&amp;$", word) == None and word != "RT" and word != "|" and word != "-"):
+        return True
+    else:
+#         print(word)
+        return False
+    
+filtered_corpus = filter(username_filter, corpus)
+filtered_corpus = list(filtered_corpus)
+# filtered_corpus
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+counter = Counter(filtered_corpus)
+most = counter.most_common()
+# most[:100]
+
+# print(len(most))
+
+x, y= [], []
+for word,count in most[:125]:
+    if (word not in stop):
+        x.append(word)
+        y.append(count)
+        
+# print(len(x)) 
+fig = plt.figure(figsize = (20, 10))
+plt.xticks(rotation = 90)
+plt.xlabel("Words")
+plt.ylabel("Count")
+sns.barplot(x = x, y = y)
+fig.savefig("freq-words-barplot.png", bbox_inches = "tight")
+
+# %% [markdown]
+# ### MOST FREQUENT N-GRAMS
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+from sklearn.feature_extraction.text import CountVectorizer
+def get_top_ngram(corpus, n=None):
+    vec = CountVectorizer(ngram_range=(n, n)).fit(corpus)
+    bow = vec.transform(corpus)
+    sum_words = bow.sum(axis=0) 
+    words_freq = [(word, sum_words[0, idx]) for word, idx in vec.vocabulary_.items()]
+    words_freq = sorted(words_freq, key = lambda x: x[1], reverse=True)
+    return words_freq[:140]
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+vec = CountVectorizer(ngram_range = (2, 2)).fit(filtered_corpus)
+bow = vec.transform(filtered_corpus)
+sum_words = bow.sum(axis = 0)
+words_freq = [(word, sum_words[0, idx]) for word, idx in vec.vocabulary_.items()]
+words_freq = sorted(words_freq, key = lambda x: x[1], reverse=True)
+# words_freq
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+top_n_bigrams=get_top_ngram(tsa['message'],2)[:30]
+print(top_n_bigrams)
+x,y=map(list,zip(*top_n_bigrams)) 
+fig = plt.figure(figsize = (20, 10))
+plt.xticks(rotation = 90)
+plt.xlabel("Bigrams")
+plt.ylabel("Count")
+sns.barplot(x = x, y = y)
+fig.savefig("freq-bigrams-barplot.png", bbox_inches = "tight")
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+top_n_trigrams=get_top_ngram(tsa['message'],3)[:25]
+print(top_n_trigrams)
+x,y=map(list,zip(*top_n_trigrams)) 
+fig = plt.figure(figsize = (20, 10))
+plt.xticks(rotation = 90)
+plt.xlabel("Trigrams")
+plt.ylabel("Count")
+sns.barplot(x = x, y = y)
+fig.savefig("freq-trigrams-barplot.png", bbox_inches = "tight")
+
+# %% [markdown]
+# ### TOPIC MODELLING WITH pyLDAvis
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+import nltk
+import gensim
+from nltk.stem import PorterStemmer
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+from nltk import punkt
+from nltk import wordnet
+# nltk.download('punkt')
+# nltk.download('wordnet')
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+def preprocess_tweets(df):
+    corpus = []
+    stem = PorterStemmer()
+    lem = wordnet.WordNetLemmatizer()
+    for tweet in df['message']:
+        words = [w for w in word_tokenize(tweet) if ((w.lower() not in stop) and username_filter(w))]
+        words = [lem.lemmatize(w) for w in words if len(w) > 2]
+        corpus.append(words)
+    return corpus
+
+corpus = preprocess_tweets(tsa)
+# corpus
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+dic = gensim.corpora.Dictionary(corpus)
+bow_corpus = [dic.doc2bow(doc) for doc in corpus]
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+lda_model = gensim.models.LdaMulticore(bow_corpus, num_topics = 4, id2word = dic, passes = 10, workers = 2)
+lda_model.show_topics()
+
+# %% [markdown]
+# ### VISUALIZING RESULTS OF LDA
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+import pyLDAvis
+from pyLDAvis import gensim_models
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+# fig = plt.figure(figsize = (20, 20))
+pyLDAvis.enable_notebook()
+vis = gensim_models.prepare(lda_model, bow_corpus, dic)
+vis
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
+from wordcloud import WordCloud, STOPWORDS
+stopwords = set(STOPWORDS)
+
+def show_wordcloud(data):
+    wordcloud = WordCloud(
+        background_color='white',
+        stopwords=stopwords,
+        max_words=100,
+        max_font_size=30,
+        scale=3,
+        random_state=1)
+   
+    wordcloud=wordcloud.generate(str(data))
+
+    fig = plt.figure(1, figsize=(12, 12))
+    plt.axis('off')
+
+    plt.imshow(wordcloud)
+    plt.show()
+    fig.savefig("wordcloud.png", bbox_inches = "tight")
+
+show_wordcloud(corpus)
+
+# %% [code] {"jupyter":{"outputs_hidden":false}}
